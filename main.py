@@ -23,7 +23,7 @@ def load_images():
         IMAGES[piece] = pygame.transform.scale(image, (SQ_SIZE, SQ_SIZE))
 
 def draw_board(screen):
-    colors = ["black", "white"]
+    colors = ["tan", "white"]
     for row in range(DIMENSION):
         for col in range(DIMENSION):
             color = colors[((row + col) % 2)]
@@ -64,6 +64,14 @@ def get_square_from_mouse(pos):
     col = x // SQ_SIZE
     row = 7 - (y // SQ_SIZE)
     return chess.square(col, row)
+
+# Show possible moves
+def draw_possible_moves(screen, board, selected_square):
+    for move in board.legal_moves:
+        if move.from_square == selected_square:
+            col = chess.square_file(move.to_square)
+            row = 7 - chess.square_rank(move.to_square)
+            pygame.draw.rect(screen, "lightblue", (col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
 
 def main():
     # Initialize Pygame and set up window
@@ -114,6 +122,7 @@ def main():
 
         # Rendering
         draw_board(screen)
+        draw_possible_moves(screen, board, selected_square)
         
         if dragging:
             draw_pieces(screen, board, selected_square, mouse_pos)
