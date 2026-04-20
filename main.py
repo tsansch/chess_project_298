@@ -7,7 +7,7 @@ import sys
 WIDTH = HEIGHT = 512
 DIMENSION = 8
 SQ_SIZE = HEIGHT // DIMENSION
-MAX_FPS = 15
+MAX_FPS = 60 
 IMAGES = {}
 
 # Check Stockfish path
@@ -24,13 +24,15 @@ def load_images():
 
 def draw_board(screen):
     colors = ["black", "white"]
-    
     for row in range(DIMENSION):
         for col in range(DIMENSION):
             color = colors[((row + col) % 2)]
             pygame.draw.rect(screen, color, pygame.Rect(col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
 
-def draw_pieces(screen, board):
+def draw_pieces(screen, board, selected_square=None, mouse_pos=None):
+    dragged_image = None
+    dragged_rect = None
+
     for i in range(64):
         piece = board.piece_at(i)
         if piece:
@@ -43,11 +45,25 @@ def draw_pieces(screen, board):
                 
             piece_name = color_prefix + symbol.upper()
             
-            # coordinates for pygame
-            col = i % 8
-            row = 7 - (i // 8) 
+            # Save dragged piece for later so it draws on top
+            if i == selected_square:
+                dragged_image = IMAGES[piece_name]
+                dragged_rect = dragged_image.get_rect(center=mouse_pos)
+            else:
+                col = i % 8
+                row = 7 - (i // 8) 
+                screen.blit(IMAGES[piece_name], pygame.Rect(col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
             
-            screen.blit(IMAGES[piece_name], pygame.Rect(col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
+    # Draw over everything
+    if dragged_image and dragged_rect:
+        screen.blit(dragged_image, dragged_rect)
+
+# Turns mouse x y into square number
+def get_square_from_mouse(pos):
+    x, y = pos
+    col = x // SQ_SIZE
+    row = 7 - (y // SQ_SIZE)
+    return chess.square(col, row)
 
 def main():
     # Initialize Pygame and set up window
@@ -58,21 +74,51 @@ def main():
     
     board = chess.Board()
     load_images()
-        
     engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
     running = True
+    selected_square = None
+    dragging = False
     
     # Main application loop
     while running:
+        mouse_pos = pygame.mouse.get_pos()
+        
         # Event Handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+                
+            # Drag piece
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1: 
+                    clicked_square = get_square_from_mouse(mouse_pos)
+                    if board.piece_at(clicked_square):
+                        selected_square = clicked_square
+                        dragging = True
+            
+            # Drop piece
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1 and dragging:
+                    drop_square = get_square_from_mouse(mouse_pos)
+                    move = chess.Move(selected_square, drop_square)
+                    
+                    if move not in board.legal_moves:
+                        move = chess.Move(selected_square, drop_square, promotion=chess.QUEEN)
+                    
+                    if move in board.legal_moves:
+                        board.push(move)
+                        
+                    selected_square = None
+                    dragging = False
 
         # Rendering
         draw_board(screen)
-        draw_pieces(screen, board)
+        
+        if dragging:
+            draw_pieces(screen, board, selected_square, mouse_pos)
+        else:
+            draw_pieces(screen, board)
         
         pygame.display.flip()
         clock.tick(MAX_FPS)
