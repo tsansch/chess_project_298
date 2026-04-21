@@ -13,3 +13,5 @@ Commit 3 (2 hours) - Added chess piece pngs, render pieces on grid
 Commit 4 (3 hours) - Implemented drag and drop piece movement, connected drop coordinates to python-chess to validate legal moves
 
 Commit 5 (1 hour) - Added UI showing possible moves, Improved board color
+
+Commit 6 (1 hour) - Added functionality for a banner to display information, currently holds turn information

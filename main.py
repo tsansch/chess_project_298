@@ -27,7 +27,11 @@ def draw_board(screen):
     for row in range(DIMENSION):
         for col in range(DIMENSION):
             color = colors[((row + col) % 2)]
-            pygame.draw.rect(screen, color, pygame.Rect(col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
+            pygame.draw.rect(
+                screen,
+                color,
+                pygame.Rect(col * SQ_SIZE, row * SQ_SIZE + BANNER_HEIGHT, SQ_SIZE, SQ_SIZE)
+            )
 
 def draw_pieces(screen, board, selected_square=None, mouse_pos=None):
     dragged_image = None
@@ -52,8 +56,11 @@ def draw_pieces(screen, board, selected_square=None, mouse_pos=None):
             else:
                 col = i % 8
                 row = 7 - (i // 8) 
-                screen.blit(IMAGES[piece_name], pygame.Rect(col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
-            
+                screen.blit(
+                    IMAGES[piece_name],
+                    pygame.Rect(col * SQ_SIZE, row * SQ_SIZE + BANNER_HEIGHT, SQ_SIZE, SQ_SIZE)
+                )
+                            
     # Draw over everything
     if dragged_image and dragged_rect:
         screen.blit(dragged_image, dragged_rect)
@@ -61,6 +68,7 @@ def draw_pieces(screen, board, selected_square=None, mouse_pos=None):
 # Turns mouse x y into square number
 def get_square_from_mouse(pos):
     x, y = pos
+    y -= BANNER_HEIGHT
     col = x // SQ_SIZE
     row = 7 - (y // SQ_SIZE)
     return chess.square(col, row)
@@ -71,12 +79,25 @@ def draw_possible_moves(screen, board, selected_square):
         if move.from_square == selected_square:
             col = chess.square_file(move.to_square)
             row = 7 - chess.square_rank(move.to_square)
-            pygame.draw.rect(screen, "lightblue", (col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
+            pygame.draw.rect(
+                screen,
+                "lightblue",
+                (col * SQ_SIZE, row * SQ_SIZE + BANNER_HEIGHT, SQ_SIZE, SQ_SIZE)
+            )
+
+BANNER_HEIGHT = 60
+def info_banner(screen, font, board):
+    pygame.draw.rect(screen, "gray20", (0, 0, WIDTH, BANNER_HEIGHT))
+    turn_text = "Player" if board.turn == chess.WHITE else "AI"
+    text_surface = font.render(f"Turn: {turn_text}", True, "white")
+    text_rect = text_surface.get_rect(center=(WIDTH // 2, BANNER_HEIGHT // 2))
+    screen.blit(text_surface, text_rect)
+
 
 def main():
     # Initialize Pygame and set up window
     pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = pygame.display.set_mode((WIDTH, HEIGHT+BANNER_HEIGHT))
     pygame.display.set_caption("Player vs Stockfish")
     clock = pygame.time.Clock()
     
@@ -121,6 +142,9 @@ def main():
                     dragging = False
 
         # Rendering
+
+        font = pygame.font.SysFont(None, 36)
+        info_banner(screen=screen,font=font,board=board)#Rending the turn/info banner
         draw_board(screen)
         draw_possible_moves(screen, board, selected_square)
         
