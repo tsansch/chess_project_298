@@ -15,3 +15,5 @@ Commit 4 (3 hours) - Implemented drag and drop piece movement, connected drop co
 Commit 5 (1 hour) - Added UI showing possible moves, Improved board color
 
 Commit 6 (1 hour) - Added functionality for a banner to display information, currently holds turn information
+
+Commit 7 (2 hours) - AAdded display for all captured pieces. Also, added display win, lose, tie
