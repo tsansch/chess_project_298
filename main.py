@@ -9,10 +9,22 @@ SIDE_PANEL = 120
 BOARD_X = SIDE_PANEL
 WIDTH = BOARD_SIZE + SIDE_PANEL * 2
 HEIGHT = 512
+BANNER_HEIGHT = 60
+WINDOW_HEIGHT = HEIGHT + BANNER_HEIGHT
 DIMENSION = 8
 SQ_SIZE = HEIGHT // DIMENSION
 MAX_FPS = 60 
 IMAGES = {}
+MODE_PVP = "pvp"
+MODE_AI = "ai"
+STATE_MENU = "menu"
+STATE_PLAYING = "playing"
+AI_DIFFICULTIES = {
+    "Easy": {"time": 0.1, "skill": 2},
+    "Medium": {"time": 0.4, "skill": 8},
+    "Hard": {"time": 1.0, "skill": 16},
+}
+MENU_BUTTON_RECT = pygame.Rect(WIDTH - SIDE_PANEL + 22, 12, 76, 36)
 
 # Check Stockfish path
 if sys.platform == "win32":
@@ -92,22 +104,82 @@ def draw_possible_moves(screen, board, selected_square):
                 (BOARD_X + col * SQ_SIZE, row * SQ_SIZE + BANNER_HEIGHT, SQ_SIZE, SQ_SIZE)
             )
 
-BANNER_HEIGHT = 60
-def info_banner(screen, font, board):
+def draw_button(screen, rect, text, font, active=False, disabled=False):
+    if disabled:
+        button_color = "gray35"
+        text_color = "gray65"
+    elif active:
+        button_color = "steelblue"
+        text_color = "white"
+    else:
+        button_color = "gray55"
+        text_color = "white"
+
+    pygame.draw.rect(screen, button_color, rect, border_radius=6)
+    pygame.draw.rect(screen, "gray15", rect, 2, border_radius=6)
+    text_surface = font.render(text, True, text_color)
+    text_rect = text_surface.get_rect(center=rect.center)
+    screen.blit(text_surface, text_rect)
+
+def get_menu_buttons():
+    button_width = 230
+    button_height = 52
+    center_x = WIDTH // 2
+    return {
+        MODE_PVP: pygame.Rect(center_x - button_width - 12, 190, button_width, button_height),
+        MODE_AI: pygame.Rect(center_x + 12, 190, button_width, button_height),
+        "Easy": pygame.Rect(center_x - button_width // 2, 295, button_width, button_height),
+        "Medium": pygame.Rect(center_x - button_width // 2, 360, button_width, button_height),
+        "Hard": pygame.Rect(center_x - button_width // 2, 425, button_width, button_height),
+    }
+
+def draw_menu(screen, title_font, font, small_font, selected_mode, error_message):
+    screen.fill("gray30")
+    title_surface = title_font.render("Choose Game Mode", True, "white")
+    title_rect = title_surface.get_rect(center=(WIDTH // 2, 105))
+    screen.blit(title_surface, title_rect)
+
+    buttons = get_menu_buttons()
+    draw_button(screen, buttons[MODE_PVP], "Player vs Player", font, selected_mode == MODE_PVP)
+    draw_button(screen, buttons[MODE_AI], "Player vs AI", font, selected_mode == MODE_AI)
+
+    if selected_mode == MODE_AI:
+        difficulty_surface = small_font.render("Choose Difficulty", True, "white")
+        difficulty_rect = difficulty_surface.get_rect(center=(WIDTH // 2, 270))
+        screen.blit(difficulty_surface, difficulty_rect)
+
+        for difficulty in AI_DIFFICULTIES:
+            draw_button(screen, buttons[difficulty], difficulty, font)
+
+    if error_message:
+        error_surface = small_font.render(error_message, True, "tomato")
+        error_rect = error_surface.get_rect(center=(WIDTH // 2, WINDOW_HEIGHT - 45))
+        screen.blit(error_surface, error_rect)
+
+def info_banner(screen, font, small_font, board, game_mode, difficulty):
     pygame.draw.rect(screen, "gray20", (0, 0, WIDTH, BANNER_HEIGHT))
-    turn_text = "Player" if board.turn == chess.WHITE else "AI"
+
     if board.is_checkmate():
-        if board.turn == chess.WHITE:
-            text = "Checkmate! You Lose"
+        if game_mode == MODE_AI:
+            text = "Checkmate! You Lose" if board.turn == chess.WHITE else "Checkmate! You Win"
         else:
-            text = "Checkmate! You Win"
+            winner = "Black" if board.turn == chess.WHITE else "White"
+            text = f"Checkmate! {winner} Wins"
     elif board.is_stalemate():
         text = "Stalemate! You Tied"
     else:
+        if game_mode == MODE_AI:
+            turn_text = "Player" if board.turn == chess.WHITE else "AI"
+            if difficulty:
+                turn_text += f" ({difficulty})" if board.turn == chess.BLACK else ""
+        else:
+            turn_text = "White" if board.turn == chess.WHITE else "Black"
         text = f"Turn: {turn_text}"
+
     text_surface = font.render(text, True, "white")
     text_rect = text_surface.get_rect(center=(WIDTH // 2, BANNER_HEIGHT // 2))
     screen.blit(text_surface, text_rect)
+    draw_button(screen, MENU_BUTTON_RECT, "Menu", small_font)
 
 # Detects which pieces have been captured
 def get_captured_pieces(board):
@@ -163,72 +235,167 @@ def draw_captured_pieces(screen, board):
         y = BANNER_HEIGHT + 30 + index * 35
         screen.blit(image, (right_x, y))
 
+def start_new_game(game_mode, difficulty):
+    board = chess.Board()
+    engine = None
+
+    if game_mode == MODE_AI:
+        try:
+            engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+            try:
+                engine.configure({"Skill Level": AI_DIFFICULTIES[difficulty]["skill"]})
+            except chess.engine.EngineError:
+                pass
+        except Exception:
+            return None, None, "Could not start Stockfish. Check STOCKFISH_PATH."
+
+    return board, engine, ""
+
+def close_engine(engine):
+    if engine:
+        try:
+            engine.quit()
+        except Exception:
+            pass
+
+def player_can_move(board, game_mode):
+    return not board.is_game_over() and (game_mode == MODE_PVP or board.turn == chess.WHITE)
+
+def player_active(board, game_mode, piece):
+    if not piece or piece.color != board.turn:
+        return False
+    return game_mode == MODE_PVP or piece.color == chess.WHITE
+
+def make_computer_move(board, engine, difficulty):
+    if not engine or board.is_game_over() or board.turn != chess.BLACK:
+        return
+
+    limit = chess.engine.Limit(time=AI_DIFFICULTIES[difficulty]["time"])
+    result = engine.play(board, limit)
+    if result.move:
+        board.push(result.move)
+
 def main():
     # Initialize Pygame and set up window
     pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT+BANNER_HEIGHT))
-    pygame.display.set_caption("Player vs Stockfish")
+    screen = pygame.display.set_mode((WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption("Chess")
     clock = pygame.time.Clock()
-    
-    board = chess.Board()
+
     load_images()
-    engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
 
     running = True
+    app_state = STATE_MENU
+    board = None
+    engine = None
+    game_mode = None
+    difficulty = None
+    selected_mode = None
+    menu_error = ""
     selected_square = None
     dragging = False
     
     # Main application loop
     while running:
         mouse_pos = pygame.mouse.get_pos()
+        font = pygame.font.SysFont(None, 36)
+        title_font = pygame.font.SysFont(None, 48)
+        small_font = pygame.font.SysFont(None, 24)
         
         # Event Handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-                
-            # Drag piece
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1: 
-                    clicked_square = get_square_from_mouse(mouse_pos)
-                    if clicked_square is not None and board.piece_at(clicked_square):
-                        selected_square = clicked_square
-                        dragging = True
-            
-            # Drop piece
-            elif event.type == pygame.MOUSEBUTTONUP:
-                if event.button == 1 and dragging:
-                    drop_square = get_square_from_mouse(mouse_pos)
-                    if drop_square is not None:
-                        move = chess.Move(selected_square, drop_square)
 
-                        if move not in board.legal_moves:
-                            move = chess.Move(selected_square, drop_square, promotion=chess.QUEEN)
-                    
-                        if move in board.legal_moves:
-                            board.push(move)
-                        
-                    selected_square = None
-                    dragging = False
+            elif app_state == STATE_MENU and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                buttons = get_menu_buttons()
+                if buttons[MODE_PVP].collidepoint(event.pos):
+                    selected_mode = MODE_PVP
+                    board, engine, menu_error = start_new_game(MODE_PVP, None)
+                    if board:
+                        app_state = STATE_PLAYING
+                        game_mode = MODE_PVP
+                        difficulty = None
+
+                elif buttons[MODE_AI].collidepoint(event.pos):
+                    selected_mode = MODE_AI
+                    menu_error = ""
+
+                elif selected_mode == MODE_AI:
+                    for chosen_difficulty in AI_DIFFICULTIES:
+                        if buttons[chosen_difficulty].collidepoint(event.pos):
+                            board, engine, menu_error = start_new_game(MODE_AI, chosen_difficulty)
+                            if board:
+                                app_state = STATE_PLAYING
+                                game_mode = MODE_AI
+                                difficulty = chosen_difficulty
+                            break
+
+            elif app_state == STATE_PLAYING:
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if MENU_BUTTON_RECT.collidepoint(event.pos):
+                        close_engine(engine)
+                        engine = None
+                        board = None
+                        app_state = STATE_MENU
+                        selected_square = None
+                        dragging = False
+                        continue
+
+                    # Drag piece
+                    clicked_square = get_square_from_mouse(event.pos)
+                    if clicked_square is not None and player_can_move(board, game_mode):
+                        piece = board.piece_at(clicked_square)
+                        if player_active(board, game_mode, piece):
+                            selected_square = clicked_square
+                            dragging = True
+
+                # Drop piece
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1 and dragging:
+                        drop_square = get_square_from_mouse(event.pos)
+                        if drop_square is not None:
+                            move = chess.Move(selected_square, drop_square)
+
+                            if move not in board.legal_moves:
+                                move = chess.Move(selected_square, drop_square, promotion=chess.QUEEN)
+
+                            if move in board.legal_moves:
+                                board.push(move)
+
+                                if game_mode == MODE_AI and not board.is_game_over():
+                                    try:
+                                        make_computer_move(board, engine, difficulty)
+                                    except Exception:
+                                        close_engine(engine)
+                                        engine = None
+                                        board = None
+                                        app_state = STATE_MENU
+                                        menu_error = "Stockfish stopped. Returning to menu."
+
+                        selected_square = None
+                        dragging = False
 
         # Rendering
-        screen.fill("gray30")
-        font = pygame.font.SysFont(None, 36)
-        info_banner(screen=screen,font=font,board=board)#Rending the turn/info banner
-        draw_board(screen)
-        draw_possible_moves(screen, board, selected_square)
-        
-        if dragging:
-            draw_pieces(screen, board, selected_square, mouse_pos)
+        if app_state == STATE_MENU:
+            draw_menu(screen, title_font, font, small_font, selected_mode, menu_error)
         else:
-            draw_pieces(screen, board)
+            screen.fill("gray30")
+            info_banner(screen, font, small_font, board, game_mode, difficulty)
+            draw_board(screen)
+            draw_possible_moves(screen, board, selected_square)
+            
+            if dragging:
+                draw_pieces(screen, board, selected_square, mouse_pos)
+            else:
+                draw_pieces(screen, board)
 
-        draw_captured_pieces(screen, board)
+            draw_captured_pieces(screen, board)
         
         pygame.display.flip()
         clock.tick(MAX_FPS)
 
-    engine.quit()
+    close_engine(engine)
     pygame.quit()
     sys.exit()
 
