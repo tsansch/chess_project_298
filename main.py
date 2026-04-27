@@ -21,11 +21,7 @@ MODE_PVP = "pvp"
 MODE_AI = "ai"
 STATE_MENU = "menu"
 STATE_PLAYING = "playing"
-AI_DIFFICULTIES = {
-    "Easy": {"time": 0.1, "skill": 2},
-    "Medium": {"time": 0.4, "skill": 8},
-    "Hard": {"time": 1.0, "skill": 16},
-}
+
 MENU_BUTTON_RECT = pygame.Rect(WIDTH - SIDE_PANEL + 22, 12, 76, 36)
 
 # Check Stockfish path
@@ -130,12 +126,32 @@ def get_menu_buttons():
     return {
         MODE_PVP: pygame.Rect(center_x - button_width - 12, 190, button_width, button_height),
         MODE_AI: pygame.Rect(center_x + 12, 190, button_width, button_height),
-        "Easy": pygame.Rect(center_x - button_width // 2, 295, button_width, button_height),
-        "Medium": pygame.Rect(center_x - button_width // 2, 360, button_width, button_height),
-        "Hard": pygame.Rect(center_x - button_width // 2, 425, button_width, button_height),
+        "Start AI": pygame.Rect(center_x - button_width // 2, 400, button_width, button_height),
     }
 
-def draw_menu(screen, title_font, font, small_font, selected_mode, error_message):
+def draw_slider(screen, font, rect, value):
+    # Draw track
+    pygame.draw.rect(screen, "gray50", rect, border_radius=5)
+    
+    # Calculate knob position
+    percent = value / 20.0
+    knob_x = rect.x + int(percent * rect.width)
+    knob_rect = pygame.Rect(knob_x - 10, rect.y - 15, 20, 40)
+    
+    # Draw filled portion
+    fill_rect = pygame.Rect(rect.x, rect.y, knob_x - rect.x, rect.height)
+    if fill_rect.width > 0:
+        pygame.draw.rect(screen, "steelblue", fill_rect, border_radius=5)
+    
+    # Draw knob
+    pygame.draw.rect(screen, "white", knob_rect, border_radius=5)
+    pygame.draw.rect(screen, "gray20", knob_rect, 2, border_radius=5)
+    
+    # Draw text
+    text = font.render(f"Stockfish Skill Level: {value}", True, "white")
+    screen.blit(text, text.get_rect(center=(WIDTH // 2, rect.y - 30)))
+
+def draw_menu(screen, title_font, font, small_font, selected_mode, error_message, skill_level, slider_rect):
     screen.fill("gray30")
     title_surface = title_font.render("Choose Game Mode", True, "white")
     title_rect = title_surface.get_rect(center=(WIDTH // 2, 105))
@@ -146,19 +162,15 @@ def draw_menu(screen, title_font, font, small_font, selected_mode, error_message
     draw_button(screen, buttons[MODE_AI], "Player vs AI", font, selected_mode == MODE_AI)
 
     if selected_mode == MODE_AI:
-        difficulty_surface = small_font.render("Choose Difficulty", True, "white")
-        difficulty_rect = difficulty_surface.get_rect(center=(WIDTH // 2, 270))
-        screen.blit(difficulty_surface, difficulty_rect)
-
-        for difficulty in AI_DIFFICULTIES:
-            draw_button(screen, buttons[difficulty], difficulty, font)
+        draw_slider(screen, font, slider_rect, skill_level)
+        draw_button(screen, buttons["Start AI"], "Start Match", font)
 
     if error_message:
         error_surface = small_font.render(error_message, True, "tomato")
         error_rect = error_surface.get_rect(center=(WIDTH // 2, WINDOW_HEIGHT - 45))
         screen.blit(error_surface, error_rect)
 
-def info_banner(screen, font, small_font, board, game_mode, difficulty):
+def info_banner(screen, font, small_font, board, game_mode, skill_level):
     pygame.draw.rect(screen, "gray20", (0, 0, WIDTH, BANNER_HEIGHT))
 
     if board.is_checkmate():
@@ -172,8 +184,8 @@ def info_banner(screen, font, small_font, board, game_mode, difficulty):
     else:
         if game_mode == MODE_AI:
             turn_text = "Player" if board.turn == chess.WHITE else "AI"
-            if difficulty:
-                turn_text += f" ({difficulty})" if board.turn == chess.BLACK else ""
+            if skill_level is not None:
+                turn_text += f" (Lvl {skill_level})" if board.turn == chess.BLACK else ""
         else:
             turn_text = "White" if board.turn == chess.WHITE else "Black"
         text = f"Turn: {turn_text}"
@@ -237,7 +249,7 @@ def draw_captured_pieces(screen, board):
         y = BANNER_HEIGHT + 30 + index * 35
         screen.blit(image, (right_x, y))
 
-def start_new_game(game_mode, difficulty):
+def start_new_game(game_mode, skill_level):
     board = chess.Board()
     engine = None
 
@@ -245,7 +257,7 @@ def start_new_game(game_mode, difficulty):
         try:
             engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
             try:
-                engine.configure({"Skill Level": AI_DIFFICULTIES[difficulty]["skill"]})
+                engine.configure({"Skill Level": skill_level})
             except chess.engine.EngineError:
                 pass
         except Exception:
@@ -268,10 +280,11 @@ def player_active(board, game_mode, piece):
         return False
     return game_mode == MODE_PVP or piece.color == chess.WHITE
 
-def fetch_ai_move(board, engine, difficulty, move_queue):
+def fetch_ai_move(board, engine, skill_level, move_queue):
     """Calculates the AI move in a background thread."""
     try:
-        limit = chess.engine.Limit(time=AI_DIFFICULTIES[difficulty]["time"])
+        think_time = 0.1 + (skill_level * 0.05)
+        limit = chess.engine.Limit(time=think_time)
         result = engine.play(board, limit)
         if result.move:
             move_queue.put(result.move)
@@ -292,12 +305,16 @@ def main():
     board = None
     engine = None
     game_mode = None
-    difficulty = None
     selected_mode = None
     menu_error = ""
     
     selected_square = None
     dragging = False
+
+    # AI and Slider Variables
+    skill_level = 10 
+    slider_rect = pygame.Rect(WIDTH // 2 - 150, 320, 300, 10)
+    slider_dragging = False
     ai_queue = queue.Queue()
     ai_thinking = False
     
@@ -313,29 +330,45 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
-            elif app_state == STATE_MENU and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            elif app_state == STATE_MENU:
                 buttons = get_menu_buttons()
-                if buttons[MODE_PVP].collidepoint(event.pos):
-                    selected_mode = MODE_PVP
-                    board, engine, menu_error = start_new_game(MODE_PVP, None)
-                    if board:
-                        app_state = STATE_PLAYING
-                        game_mode = MODE_PVP
-                        difficulty = None
-
-                elif buttons[MODE_AI].collidepoint(event.pos):
-                    selected_mode = MODE_AI
-                    menu_error = ""
-
-                elif selected_mode == MODE_AI:
-                    for chosen_difficulty in AI_DIFFICULTIES:
-                        if buttons[chosen_difficulty].collidepoint(event.pos):
-                            board, engine, menu_error = start_new_game(MODE_AI, chosen_difficulty)
+                
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if buttons[MODE_PVP].collidepoint(event.pos):
+                        selected_mode = MODE_PVP
+                        board, engine, menu_error = start_new_game(MODE_PVP, None)
+                        if board:
+                            app_state = STATE_PLAYING
+                            game_mode = MODE_PVP
+                            
+                    elif buttons[MODE_AI].collidepoint(event.pos):
+                        selected_mode = MODE_AI
+                        menu_error = ""
+                        
+                    elif selected_mode == MODE_AI:
+                        # Check if clicking the slider knob
+                        percent = skill_level / 20.0
+                        knob_x = slider_rect.x + int(percent * slider_rect.width)
+                        knob_rect = pygame.Rect(knob_x - 10, slider_rect.y - 15, 20, 40)
+                        
+                        if knob_rect.collidepoint(event.pos) or slider_rect.collidepoint(event.pos):
+                            slider_dragging = True
+                            
+                        # Check if clicking Start Game
+                        elif buttons["Start AI"].collidepoint(event.pos):
+                            board, engine, menu_error = start_new_game(MODE_AI, skill_level)
                             if board:
                                 app_state = STATE_PLAYING
                                 game_mode = MODE_AI
-                                difficulty = chosen_difficulty
-                            break
+
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    slider_dragging = False
+
+                elif event.type == pygame.MOUSEMOTION:
+                    if slider_dragging:
+                        relative_x = event.pos[0] - slider_rect.x
+                        percentage = max(0, min(1, relative_x / slider_rect.width))
+                        skill_level = int(percentage * 20)
 
             elif app_state == STATE_PLAYING:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -378,7 +411,7 @@ def main():
                                     # Use board.copy() so Pygame renderer doesn't clash with engine
                                     threading.Thread(
                                         target=fetch_ai_move,
-                                        args=(board.copy(), engine, difficulty, ai_queue),
+                                        args=(board.copy(), engine, skill_level, ai_queue),
                                         daemon=True
                                     ).start()
 
@@ -402,10 +435,10 @@ def main():
 
         # Rendering
         if app_state == STATE_MENU:
-            draw_menu(screen, title_font, font, small_font, selected_mode, menu_error)
+            draw_menu(screen, title_font, font, small_font, selected_mode, menu_error, skill_level, slider_rect)
         else:
             screen.fill("gray30")
-            info_banner(screen, font, small_font, board, game_mode, difficulty)
+            info_banner(screen, font, small_font, board, game_mode, skill_level if game_mode == MODE_AI else None)
             draw_board(screen)
             draw_possible_moves(screen, board, selected_square)
             
