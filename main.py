@@ -4,6 +4,7 @@ import chess.engine
 import sys
 import threading
 import queue
+import random
 
 # Configuration
 BOARD_SIZE = 512
@@ -47,7 +48,20 @@ def draw_board(screen):
                 pygame.Rect(BOARD_X + col * SQ_SIZE, row * SQ_SIZE + BANNER_HEIGHT, SQ_SIZE, SQ_SIZE)
             )
 
-def draw_pieces(screen, board, selected_square=None, mouse_pos=None):
+def get_screen_pos(square, player_color):
+    file = chess.square_file(square)
+    rank = chess.square_rank(square)
+    
+    if player_color == chess.BLACK:
+        col = 7 - file
+        row_py = rank
+    else:
+        col = file
+        row_py = 7 - rank
+        
+    return BOARD_X + col * SQ_SIZE, BANNER_HEIGHT + row_py * SQ_SIZE
+
+def draw_pieces(screen, board, player_color, selected_square=None, mouse_pos=None):
     dragged_image = None
     dragged_rect = None
 
@@ -68,38 +82,44 @@ def draw_pieces(screen, board, selected_square=None, mouse_pos=None):
                 dragged_image = IMAGES[piece_name]
                 dragged_rect = dragged_image.get_rect(center=mouse_pos)
             else:
-                col = i % 8
-                row = 7 - (i // 8) 
+                x, y = get_screen_pos(i, player_color)
                 screen.blit(
                     IMAGES[piece_name],
-                    pygame.Rect(BOARD_X + col * SQ_SIZE, row * SQ_SIZE + BANNER_HEIGHT, SQ_SIZE, SQ_SIZE)
+                    pygame.Rect(x, y, SQ_SIZE, SQ_SIZE)
                 )
                             
     # Draw over everything
     if dragged_image and dragged_rect:
         screen.blit(dragged_image, dragged_rect)
 
-# Turns mouse x y into square number
-def get_square_from_mouse(pos):
+# Turns mouse x y into square number based on perspective
+def get_square_from_mouse(pos, player_color):
     x, y = pos
     x -= BOARD_X
     y -= BANNER_HEIGHT
     if x < 0 or x >= BOARD_SIZE or y < 0 or y >= BOARD_SIZE:
         return None
     col = x // SQ_SIZE
-    row = 7 - (y // SQ_SIZE)
-    return chess.square(col, row)
+    row_py = y // SQ_SIZE
+    
+    if player_color == chess.BLACK:
+        file = 7 - col
+        rank = row_py
+    else:
+        file = col
+        rank = 7 - row_py
+        
+    return chess.square(file, rank)
 
 # Show possible moves
-def draw_possible_moves(screen, board, selected_square):
+def draw_possible_moves(screen, board, selected_square, player_color):
     for move in board.legal_moves:
         if move.from_square == selected_square:
-            col = chess.square_file(move.to_square)
-            row = 7 - chess.square_rank(move.to_square)
+            x, y = get_screen_pos(move.to_square, player_color)
             pygame.draw.rect(
                 screen,
                 "lightblue",
-                (BOARD_X + col * SQ_SIZE, row * SQ_SIZE + BANNER_HEIGHT, SQ_SIZE, SQ_SIZE)
+                (x, y, SQ_SIZE, SQ_SIZE)
             )
 
 def draw_button(screen, rect, text, font, active=False, disabled=False):
@@ -124,8 +144,11 @@ def get_menu_buttons():
     button_height = 52
     center_x = WIDTH // 2
     return {
-        MODE_PVP: pygame.Rect(center_x - button_width - 12, 190, button_width, button_height),
-        MODE_AI: pygame.Rect(center_x + 12, 190, button_width, button_height),
+        MODE_PVP: pygame.Rect(center_x - button_width - 12, 170, button_width, button_height),
+        MODE_AI: pygame.Rect(center_x + 12, 170, button_width, button_height),
+        "Play White": pygame.Rect(center_x - 160, 250, 100, 40),
+        "Play Random": pygame.Rect(center_x - 50, 250, 100, 40), 
+        "Play Black": pygame.Rect(center_x + 60, 250, 100, 40),
         "Start AI": pygame.Rect(center_x - button_width // 2, 400, button_width, button_height),
     }
 
@@ -151,7 +174,7 @@ def draw_slider(screen, font, rect, value):
     text = font.render(f"Stockfish Skill Level: {value}", True, "white")
     screen.blit(text, text.get_rect(center=(WIDTH // 2, rect.y - 30)))
 
-def draw_menu(screen, title_font, font, small_font, selected_mode, error_message, skill_level, slider_rect):
+def draw_menu(screen, title_font, font, small_font, selected_mode, error_message, skill_level, slider_rect, selected_color):
     screen.fill("gray30")
     title_surface = title_font.render("Choose Game Mode", True, "white")
     title_rect = title_surface.get_rect(center=(WIDTH // 2, 105))
@@ -162,6 +185,13 @@ def draw_menu(screen, title_font, font, small_font, selected_mode, error_message
     draw_button(screen, buttons[MODE_AI], "Player vs AI", font, selected_mode == MODE_AI)
 
     if selected_mode == MODE_AI:
+        # Re-center random button based on logic
+        buttons["Play Random"] = pygame.Rect(WIDTH // 2 - 50, 250, 100, 40)
+        
+        draw_button(screen, buttons["Play White"], "White", small_font, selected_color == "White")
+        draw_button(screen, buttons["Play Random"], "Random", small_font, selected_color == "Random")
+        draw_button(screen, buttons["Play Black"], "Black", small_font, selected_color == "Black")
+        
         draw_slider(screen, font, slider_rect, skill_level)
         draw_button(screen, buttons["Start AI"], "Start Match", font)
 
@@ -170,12 +200,12 @@ def draw_menu(screen, title_font, font, small_font, selected_mode, error_message
         error_rect = error_surface.get_rect(center=(WIDTH // 2, WINDOW_HEIGHT - 45))
         screen.blit(error_surface, error_rect)
 
-def info_banner(screen, font, small_font, board, game_mode, skill_level):
+def info_banner(screen, font, small_font, board, game_mode, skill_level, player_color):
     pygame.draw.rect(screen, "gray20", (0, 0, WIDTH, BANNER_HEIGHT))
 
     if board.is_checkmate():
         if game_mode == MODE_AI:
-            text = "Checkmate! You Lose" if board.turn == chess.WHITE else "Checkmate! You Win"
+            text = "Checkmate! You Lose" if board.turn == player_color else "Checkmate! You Win"
         else:
             winner = "Black" if board.turn == chess.WHITE else "White"
             text = f"Checkmate! {winner} Wins"
@@ -183,9 +213,9 @@ def info_banner(screen, font, small_font, board, game_mode, skill_level):
         text = "Stalemate! You Tied"
     else:
         if game_mode == MODE_AI:
-            turn_text = "Player" if board.turn == chess.WHITE else "AI"
+            turn_text = "Player" if board.turn == player_color else "AI"
             if skill_level is not None:
-                turn_text += f" (Lvl {skill_level})" if board.turn == chess.BLACK else ""
+                turn_text += f" (Lvl {skill_level})" if board.turn != player_color else ""
         else:
             turn_text = "White" if board.turn == chess.WHITE else "Black"
         text = f"Turn: {turn_text}"
@@ -272,13 +302,13 @@ def close_engine(engine):
         except Exception:
             pass
 
-def player_can_move(board, game_mode, ai_thinking):
-    return not board.is_game_over() and not ai_thinking and (game_mode == MODE_PVP or board.turn == chess.WHITE)
+def player_can_move(board, game_mode, ai_thinking, player_color):
+    return not board.is_game_over() and not ai_thinking and (game_mode == MODE_PVP or board.turn == player_color)
 
-def player_active(board, game_mode, piece):
+def player_active(board, game_mode, piece, player_color):
     if not piece or piece.color != board.turn:
         return False
-    return game_mode == MODE_PVP or piece.color == chess.WHITE
+    return game_mode == MODE_PVP or piece.color == player_color
 
 def fetch_ai_move(board, engine, skill_level, move_queue):
     """Calculates the AI move in a background thread."""
@@ -313,11 +343,13 @@ def main():
 
     # AI and Slider Variables
     skill_level = 10 
-    slider_rect = pygame.Rect(WIDTH // 2 - 150, 320, 300, 10)
+    slider_rect = pygame.Rect(WIDTH // 2 - 150, 340, 300, 10)
     slider_dragging = False
     ai_queue = queue.Queue()
     ai_thinking = False
     
+    selected_color = "White"
+    game_player_color = chess.WHITE
     # Main application loop
     while running:
         mouse_pos = pygame.mouse.get_pos()
@@ -332,6 +364,7 @@ def main():
 
             elif app_state == STATE_MENU:
                 buttons = get_menu_buttons()
+                buttons["Play Random"] = pygame.Rect(WIDTH // 2 - 50, 250, 100, 40)
                 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if buttons[MODE_PVP].collidepoint(event.pos):
@@ -340,12 +373,21 @@ def main():
                         if board:
                             app_state = STATE_PLAYING
                             game_mode = MODE_PVP
+                            game_player_color = chess.WHITE # Default orientation for PvP
                             
                     elif buttons[MODE_AI].collidepoint(event.pos):
                         selected_mode = MODE_AI
                         menu_error = ""
                         
                     elif selected_mode == MODE_AI:
+                        # Check color buttons
+                        if buttons["Play White"].collidepoint(event.pos):
+                            selected_color = "White"
+                        elif buttons["Play Random"].collidepoint(event.pos):
+                            selected_color = "Random"
+                        elif buttons["Play Black"].collidepoint(event.pos):
+                            selected_color = "Black"
+                            
                         # Check if clicking the slider knob
                         percent = skill_level / 20.0
                         knob_x = slider_rect.x + int(percent * slider_rect.width)
@@ -356,6 +398,13 @@ def main():
                             
                         # Check if clicking Start Game
                         elif buttons["Start AI"].collidepoint(event.pos):
+                            if selected_color == "Random":
+                                game_player_color = random.choice([chess.WHITE, chess.BLACK])
+                            elif selected_color == "Black":
+                                game_player_color = chess.BLACK
+                            else:
+                                game_player_color = chess.WHITE
+                                
                             board, engine, menu_error = start_new_game(MODE_AI, skill_level)
                             if board:
                                 app_state = STATE_PLAYING
@@ -386,17 +435,17 @@ def main():
                         continue
 
                     # Drag piece
-                    clicked_square = get_square_from_mouse(event.pos)
-                    if clicked_square is not None and player_can_move(board, game_mode, ai_thinking):
+                    clicked_square = get_square_from_mouse(event.pos, game_player_color)
+                    if clicked_square is not None and player_can_move(board, game_mode, ai_thinking, game_player_color):
                         piece = board.piece_at(clicked_square)
-                        if player_active(board, game_mode, piece):
+                        if player_active(board, game_mode, piece, game_player_color):
                             selected_square = clicked_square
                             dragging = True
 
                 # Drop piece
                 elif event.type == pygame.MOUSEBUTTONUP:
                     if event.button == 1 and dragging:
-                        drop_square = get_square_from_mouse(event.pos)
+                        drop_square = get_square_from_mouse(event.pos, game_player_color)
                         if drop_square is not None:
                             move = chess.Move(selected_square, drop_square)
 
@@ -406,17 +455,18 @@ def main():
                             if move in board.legal_moves:
                                 board.push(move)
 
-                                if game_mode == MODE_AI and not board.is_game_over():
-                                    ai_thinking = True
-                                    # Use board.copy() so Pygame renderer doesn't clash with engine
-                                    threading.Thread(
-                                        target=fetch_ai_move,
-                                        args=(board.copy(), engine, skill_level, ai_queue),
-                                        daemon=True
-                                    ).start()
-
                         selected_square = None
                         dragging = False
+
+        # AI Auto-Start 
+        if app_state == STATE_PLAYING and game_mode == MODE_AI and not board.is_game_over():
+            if board.turn != game_player_color and not ai_thinking:
+                ai_thinking = True
+                threading.Thread(
+                    target=fetch_ai_move,
+                    args=(board.copy(), engine, skill_level, ai_queue),
+                    daemon=True
+                ).start()
 
         # Check if the AI thread has finished thinking
         if ai_thinking and not ai_queue.empty():
@@ -435,17 +485,17 @@ def main():
 
         # Rendering
         if app_state == STATE_MENU:
-            draw_menu(screen, title_font, font, small_font, selected_mode, menu_error, skill_level, slider_rect)
+            draw_menu(screen, title_font, font, small_font, selected_mode, menu_error, skill_level, slider_rect, selected_color)
         else:
             screen.fill("gray30")
-            info_banner(screen, font, small_font, board, game_mode, skill_level if game_mode == MODE_AI else None)
+            info_banner(screen, font, small_font, board, game_mode, skill_level if game_mode == MODE_AI else None, game_player_color)
             draw_board(screen)
-            draw_possible_moves(screen, board, selected_square)
+            draw_possible_moves(screen, board, selected_square, game_player_color)
             
             if dragging:
-                draw_pieces(screen, board, selected_square, mouse_pos)
+                draw_pieces(screen, board, game_player_color, selected_square, mouse_pos)
             else:
-                draw_pieces(screen, board)
+                draw_pieces(screen, board, game_player_color)
 
             draw_captured_pieces(screen, board)
         
