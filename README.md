@@ -34,3 +34,5 @@ Team Evaluations:
 ![James Team Evaluation.png](James%20Team%20Evaluation.png)
 
 <img width="771" height="634" alt="image" src="https://github.com/user-attachments/assets/1f815209-4302-4dfc-92fc-745d2d64bdcc" />
+
+![Remi_Evaluation_Form.png](Remi_Evaluation_Form.png)
