@@ -22,6 +22,10 @@ Commit 8 (9 hours) - Added playing against the computer, added menu, computer op
 
 Commit 9 (0.5 hours) - Added my team evaluation to ReadMe
 
+Commit 10 (5 hours) - Implement stockfish engine threading to stop freezing between moves
+
+Commit 11 (4 hours) - Updated AI difficulty options with slider to use official stockfish levels (1-20) 
+
 Team Evaluations:
 ![James Team Evaluation.png](James%20Team%20Evaluation.png)
 
