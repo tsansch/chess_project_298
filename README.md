@@ -16,6 +16,12 @@ Commit 5 (1 hour) - Added UI showing possible moves, Improved board color
 
 Commit 6 (1 hour) - Added functionality for a banner to display information, currently holds turn information
 
-Commit 7 (2 hours) - AAdded display for all captured pieces. Also, added display win, lose, tie
+Commit 7 (2 hours) - Added display for all captured pieces. Also, added display win, lose, tie
 
 Commit 8 (9 hours) - Added playing against the computer, added menu, computer opponent difficulties
+
+Commit 9 (0.5 hours) - Added my team evaluation to ReadMe
+
+Team Evaluations:
+![James Team Evaluation.png](James%20Team%20Evaluation.png)
+

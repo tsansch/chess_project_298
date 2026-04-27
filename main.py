@@ -218,7 +218,7 @@ def draw_captured_pieces(screen, board):
     left_x = 20
     right_x = WIDTH - 20 - small_size
 
-    left_label = font.render("Captured ", True, "white")
+    left_label = font.render("Captured", True, "white")
     right_label = font.render("Captured", True, "white")
     screen.blit(left_label, (10, BANNER_HEIGHT + 5))
     screen.blit(right_label, (WIDTH - SIDE_PANEL + 10, BANNER_HEIGHT + 5))
