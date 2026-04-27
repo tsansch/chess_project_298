@@ -2,6 +2,8 @@ import pygame
 import chess
 import chess.engine
 import sys
+import threading
+import queue
 
 # Configuration
 BOARD_SIZE = 512
@@ -258,22 +260,23 @@ def close_engine(engine):
         except Exception:
             pass
 
-def player_can_move(board, game_mode):
-    return not board.is_game_over() and (game_mode == MODE_PVP or board.turn == chess.WHITE)
+def player_can_move(board, game_mode, ai_thinking):
+    return not board.is_game_over() and not ai_thinking and (game_mode == MODE_PVP or board.turn == chess.WHITE)
 
 def player_active(board, game_mode, piece):
     if not piece or piece.color != board.turn:
         return False
     return game_mode == MODE_PVP or piece.color == chess.WHITE
 
-def make_computer_move(board, engine, difficulty):
-    if not engine or board.is_game_over() or board.turn != chess.BLACK:
-        return
-
-    limit = chess.engine.Limit(time=AI_DIFFICULTIES[difficulty]["time"])
-    result = engine.play(board, limit)
-    if result.move:
-        board.push(result.move)
+def fetch_ai_move(board, engine, difficulty, move_queue):
+    """Calculates the AI move in a background thread."""
+    try:
+        limit = chess.engine.Limit(time=AI_DIFFICULTIES[difficulty]["time"])
+        result = engine.play(board, limit)
+        if result.move:
+            move_queue.put(result.move)
+    except Exception as e:
+        move_queue.put(e) # Pass the crash back to the main thread safely
 
 def main():
     # Initialize Pygame and set up window
@@ -292,8 +295,11 @@ def main():
     difficulty = None
     selected_mode = None
     menu_error = ""
+    
     selected_square = None
     dragging = False
+    ai_queue = queue.Queue()
+    ai_thinking = False
     
     # Main application loop
     while running:
@@ -340,11 +346,15 @@ def main():
                         app_state = STATE_MENU
                         selected_square = None
                         dragging = False
+                        ai_thinking = False
+                        # Clear old AI moves
+                        while not ai_queue.empty():
+                            ai_queue.get()
                         continue
 
                     # Drag piece
                     clicked_square = get_square_from_mouse(event.pos)
-                    if clicked_square is not None and player_can_move(board, game_mode):
+                    if clicked_square is not None and player_can_move(board, game_mode, ai_thinking):
                         piece = board.piece_at(clicked_square)
                         if player_active(board, game_mode, piece):
                             selected_square = clicked_square
@@ -364,17 +374,31 @@ def main():
                                 board.push(move)
 
                                 if game_mode == MODE_AI and not board.is_game_over():
-                                    try:
-                                        make_computer_move(board, engine, difficulty)
-                                    except Exception:
-                                        close_engine(engine)
-                                        engine = None
-                                        board = None
-                                        app_state = STATE_MENU
-                                        menu_error = "Stockfish stopped. Returning to menu."
+                                    ai_thinking = True
+                                    # Use board.copy() so Pygame renderer doesn't clash with engine
+                                    threading.Thread(
+                                        target=fetch_ai_move,
+                                        args=(board.copy(), engine, difficulty, ai_queue),
+                                        daemon=True
+                                    ).start()
 
                         selected_square = None
                         dragging = False
+
+        # Check if the AI thread has finished thinking
+        if ai_thinking and not ai_queue.empty():
+            ai_result = ai_queue.get()
+            
+            if isinstance(ai_result, Exception):
+                close_engine(engine)
+                engine = None
+                board = None
+                app_state = STATE_MENU
+                menu_error = "Stockfish stopped. Returning to menu."
+            else:
+                board.push(ai_result)
+                
+            ai_thinking = False
 
         # Rendering
         if app_state == STATE_MENU:
